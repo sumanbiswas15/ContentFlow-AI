@@ -220,7 +220,8 @@ async def get_user_jobs(
         skip=skip
     )
     
-    return [JobStatusResponse(**job) for job in jobs]
+    # Map 'id' to 'job_id' for response model
+    return [JobStatusResponse(job_id=job.get('id', job.get('job_id')), **{k: v for k, v in job.items() if k != 'id'}) for job in jobs]
 
 
 @router.get("/history")

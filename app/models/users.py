@@ -120,6 +120,7 @@ class User(BaseDocument):
     
     # Authentication
     hashed_password: str
+    password_hash: Optional[str] = None  # Alias for compatibility
     api_keys: List[APIKey] = Field(default_factory=list)
     
     # Usage tracking

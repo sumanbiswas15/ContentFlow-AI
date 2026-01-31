@@ -7,6 +7,7 @@ for the test suite.
 
 import asyncio
 import pytest
+import pytest_asyncio
 from typing import AsyncGenerator
 from httpx import AsyncClient
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -24,7 +25,7 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_db():
     """Create a test database connection."""
     # Use a test database
@@ -43,10 +44,10 @@ async def test_db():
     client.close()
 
 
-@pytest.fixture
-async def client(test_db):
+@pytest_asyncio.fixture
+async def client(test_db) -> AsyncGenerator[AsyncClient, None]:
     """Create a test client."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(app=app, base_url="http://localhost") as ac:
         yield ac
 
 

@@ -21,9 +21,16 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     
     # Security
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    SECRET_KEY: Optional[str] = None
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    
+    @validator("SECRET_KEY", pre=True, always=True)
+    def generate_secret_key_if_missing(cls, v):
+        """Generate a random secret key if not provided."""
+        if v is None or v == "":
+            return secrets.token_urlsafe(32)
+        return v
     
     # CORS and Security
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []

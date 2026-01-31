@@ -20,10 +20,37 @@ class PyObjectId(ObjectId):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
+    def validate(cls, v, handler=None):
+        """Validate ObjectId for Pydantic V2 compatibility."""
+        if isinstance(v, ObjectId):
+            return v
+        if isinstance(v, str):
+            if not ObjectId.is_valid(v):
+                raise ValueError("Invalid ObjectId")
+            return ObjectId(v)
+        raise ValueError(f"Invalid ObjectId type: {type(v)}")
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        """Pydantic V2 core schema."""
+        from pydantic_core import core_schema
+        
+        def validate_from_any(value):
+            if isinstance(value, ObjectId):
+                return value
+            if isinstance(value, str):
+                if not ObjectId.is_valid(value):
+                    raise ValueError("Invalid ObjectId")
+                return ObjectId(value)
+            raise ValueError(f"Invalid ObjectId type: {type(value)}")
+        
+        return core_schema.no_info_plain_validator_function(
+            validate_from_any,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda x: str(x),
+                return_schema=core_schema.str_schema(),
+            ),
+        )
 
     @classmethod
     def __get_pydantic_json_schema__(cls, field_schema):

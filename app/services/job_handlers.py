@@ -2,7 +2,8 @@
 Job handlers for different types of async jobs.
 
 This module contains handler functions that execute specific job types
-in the background job processing system.
+in the background job processing system using the AI Orchestrator and
+specialized engines.
 """
 
 import asyncio
@@ -11,14 +12,33 @@ from typing import Any, Dict
 from datetime import datetime
 
 from app.models.jobs import AsyncJob
-from app.models.base import JobType
+from app.models.base import JobType, EngineType
 from app.core.exceptions import JobProcessingError, AIServiceError
+from app.ai.orchestrator import AIOrchestrator
 
 logger = logging.getLogger(__name__)
 
+# Global orchestrator instance (will be initialized by the application)
+_orchestrator: AIOrchestrator = None
+
+
+def set_orchestrator(orchestrator: AIOrchestrator):
+    """Set the global orchestrator instance for job handlers."""
+    global _orchestrator
+    _orchestrator = orchestrator
+    logger.info("Orchestrator set for job handlers")
+
+
+def get_orchestrator() -> AIOrchestrator:
+    """Get the global orchestrator instance."""
+    if _orchestrator is None:
+        # Initialize orchestrator if not set
+        return AIOrchestrator()
+    return _orchestrator
+
 
 class JobResult:
-    """Simple job result class for demonstration."""
+    """Simple job result class for job processing."""
     
     def __init__(self, data: Any, tokens_used: int = 0, cost: float = 0.0):
         self.data = data
@@ -28,18 +48,18 @@ class JobResult:
 
 async def handle_content_generation(job: AsyncJob) -> JobResult:
     """
-    Handle content generation jobs.
-    
-    This is a placeholder implementation that simulates AI content generation.
-    In a real implementation, this would call the appropriate AI engine.
+    Handle content generation jobs using Text Intelligence Engine.
     """
     logger.info(f"Processing content generation job {job.id}")
     
     try:
+        orchestrator = get_orchestrator()
+        
         # Extract parameters
-        content_type = job.parameters.get("content_type", "text")
+        content_type = job.parameters.get("content_type", "blog")
         prompt = job.parameters.get("prompt", "")
-        max_length = job.parameters.get("max_length", 1000)
+        tone = job.parameters.get("tone", "professional")
+        target_length = job.parameters.get("target_length")
         
         if not prompt:
             raise JobProcessingError(
@@ -47,28 +67,24 @@ async def handle_content_generation(job: AsyncJob) -> JobResult:
                 message="Prompt is required for content generation"
             )
         
-        # Simulate AI processing time
-        processing_time = min(max_length / 100, 10)  # Simulate based on length
-        await asyncio.sleep(processing_time)
-        
-        # Simulate content generation
-        generated_content = f"Generated {content_type} content based on: {prompt[:50]}..."
-        
-        # Simulate token usage and cost
-        tokens_used = len(prompt.split()) + len(generated_content.split())
-        cost = tokens_used * 0.0001  # $0.0001 per token
+        # Execute through orchestrator
+        result = await orchestrator.execute_engine_operation(
+            engine_type=EngineType.TEXT_INTELLIGENCE,
+            operation="generate",
+            parameters={
+                "content_type": content_type,
+                "prompt": prompt,
+                "tone": tone,
+                "target_length": target_length
+            }
+        )
         
         logger.info(f"Content generation job {job.id} completed successfully")
         
         return JobResult(
-            data={
-                "content": generated_content,
-                "content_type": content_type,
-                "prompt": prompt,
-                "length": len(generated_content)
-            },
-            tokens_used=tokens_used,
-            cost=cost
+            data=result,
+            tokens_used=result.get("metadata", {}).get("tokens_used", 0),
+            cost=result.get("cost", 0.0)
         )
         
     except Exception as e:
@@ -81,15 +97,16 @@ async def handle_content_generation(job: AsyncJob) -> JobResult:
 
 async def handle_content_transformation(job: AsyncJob) -> JobResult:
     """
-    Handle content transformation jobs (summarization, tone change, etc.).
+    Handle content transformation jobs using Text Intelligence Engine.
     """
     logger.info(f"Processing content transformation job {job.id}")
     
     try:
+        orchestrator = get_orchestrator()
+        
         # Extract parameters
         content = job.parameters.get("content", "")
         transformation_type = job.parameters.get("transformation_type", "summarize")
-        target_length = job.parameters.get("target_length", 500)
         
         if not content:
             raise JobProcessingError(
@@ -97,38 +114,46 @@ async def handle_content_transformation(job: AsyncJob) -> JobResult:
                 message="Content is required for transformation"
             )
         
-        # Simulate processing time based on content length
-        processing_time = min(len(content) / 1000, 15)
-        await asyncio.sleep(processing_time)
-        
-        # Simulate transformation
+        # Route to appropriate operation
         if transformation_type == "summarize":
-            transformed_content = f"Summary of: {content[:target_length]}..."
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.TEXT_INTELLIGENCE,
+                operation="summarize",
+                parameters={
+                    "content": content,
+                    "target_length": job.parameters.get("target_length", 100)
+                }
+            )
         elif transformation_type == "tone_change":
-            tone = job.parameters.get("target_tone", "professional")
-            transformed_content = f"Content rewritten in {tone} tone: {content[:target_length]}..."
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.TEXT_INTELLIGENCE,
+                operation="transform_tone",
+                parameters={
+                    "content": content,
+                    "target_tone": job.parameters.get("target_tone", "professional")
+                }
+            )
         elif transformation_type == "translate":
-            target_language = job.parameters.get("target_language", "Spanish")
-            transformed_content = f"Content translated to {target_language}: {content[:target_length]}..."
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.TEXT_INTELLIGENCE,
+                operation="translate",
+                parameters={
+                    "content": content,
+                    "target_language": job.parameters.get("target_language", "es")
+                }
+            )
         else:
-            transformed_content = f"Content transformed ({transformation_type}): {content[:target_length]}..."
-        
-        # Simulate token usage and cost
-        tokens_used = len(content.split()) + len(transformed_content.split())
-        cost = tokens_used * 0.0001
+            raise JobProcessingError(
+                job_id=str(job.id),
+                message=f"Unknown transformation type: {transformation_type}"
+            )
         
         logger.info(f"Content transformation job {job.id} completed successfully")
         
         return JobResult(
-            data={
-                "original_content": content,
-                "transformed_content": transformed_content,
-                "transformation_type": transformation_type,
-                "original_length": len(content),
-                "transformed_length": len(transformed_content)
-            },
-            tokens_used=tokens_used,
-            cost=cost
+            data=result,
+            tokens_used=result.get("metadata", {}).get("tokens_used", 0),
+            cost=result.get("cost", 0.0)
         )
         
     except Exception as e:
@@ -141,61 +166,60 @@ async def handle_content_transformation(job: AsyncJob) -> JobResult:
 
 async def handle_creative_assistance(job: AsyncJob) -> JobResult:
     """
-    Handle creative assistance jobs.
+    Handle creative assistance jobs using Creative Assistant Engine.
     """
     logger.info(f"Processing creative assistance job {job.id}")
     
     try:
-        # Extract parameters
-        session_type = job.parameters.get("session_type", "ideation")
-        context = job.parameters.get("context", "")
-        request = job.parameters.get("request", "")
+        orchestrator = get_orchestrator()
         
-        if not request:
+        # Extract parameters
+        session_id = job.parameters.get("session_id")
+        operation_type = job.parameters.get("operation_type", "suggest")
+        
+        if not session_id and operation_type != "start_session":
             raise JobProcessingError(
                 job_id=str(job.id),
-                message="Request is required for creative assistance"
+                message="Session ID is required for creative assistance"
             )
         
-        # Simulate processing time
-        await asyncio.sleep(2)
-        
-        # Generate suggestions based on session type
-        if session_type == "ideation":
-            suggestions = [
-                f"Idea 1 based on: {request}",
-                f"Idea 2 based on: {request}",
-                f"Idea 3 based on: {request}"
-            ]
-        elif session_type == "rewrite":
-            suggestions = [
-                f"Rewrite option 1: {request[:100]}...",
-                f"Rewrite option 2: {request[:100]}...",
-                f"Rewrite option 3: {request[:100]}..."
-            ]
+        # Route to appropriate operation
+        if operation_type == "start_session":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.CREATIVE_ASSISTANT,
+                operation="start_session",
+                parameters=job.parameters.get("context", {})
+            )
+        elif operation_type == "suggest":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.CREATIVE_ASSISTANT,
+                operation="suggest",
+                parameters={
+                    "session_id": session_id,
+                    **job.parameters.get("request", {})
+                }
+            )
+        elif operation_type == "refine":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.CREATIVE_ASSISTANT,
+                operation="refine",
+                parameters={
+                    "session_id": session_id,
+                    **job.parameters.get("feedback", {})
+                }
+            )
         else:
-            suggestions = [
-                f"Suggestion 1 for {session_type}: {request[:50]}...",
-                f"Suggestion 2 for {session_type}: {request[:50]}...",
-                f"Suggestion 3 for {session_type}: {request[:50]}..."
-            ]
-        
-        # Simulate token usage
-        tokens_used = len(request.split()) + sum(len(s.split()) for s in suggestions)
-        cost = tokens_used * 0.0001
+            raise JobProcessingError(
+                job_id=str(job.id),
+                message=f"Unknown operation type: {operation_type}"
+            )
         
         logger.info(f"Creative assistance job {job.id} completed successfully")
         
         return JobResult(
-            data={
-                "session_type": session_type,
-                "context": context,
-                "request": request,
-                "suggestions": suggestions,
-                "suggestion_count": len(suggestions)
-            },
-            tokens_used=tokens_used,
-            cost=cost
+            data=result,
+            tokens_used=0,  # Tokens tracked at engine level
+            cost=0.0
         )
         
     except Exception as e:
@@ -208,68 +232,77 @@ async def handle_creative_assistance(job: AsyncJob) -> JobResult:
 
 async def handle_social_media_optimization(job: AsyncJob) -> JobResult:
     """
-    Handle social media optimization jobs.
+    Handle social media optimization jobs using Social Media Planner.
     """
     logger.info(f"Processing social media optimization job {job.id}")
     
     try:
+        orchestrator = get_orchestrator()
+        
         # Extract parameters
         content = job.parameters.get("content", "")
         platform = job.parameters.get("platform", "generic")
-        optimization_type = job.parameters.get("optimization_type", "hashtags")
+        optimization_type = job.parameters.get("optimization_type", "optimize")
         
-        if not content:
+        if not content and optimization_type != "suggest_times":
             raise JobProcessingError(
                 job_id=str(job.id),
                 message="Content is required for social media optimization"
             )
         
-        # Simulate processing time
-        await asyncio.sleep(1.5)
-        
-        result_data = {"original_content": content, "platform": platform}
-        
-        if optimization_type == "hashtags":
-            # Generate hashtags based on content
-            hashtags = [
-                "#contentcreation",
-                "#socialmedia",
-                "#marketing",
-                f"#{platform}",
-                "#engagement"
-            ]
-            result_data["hashtags"] = hashtags
-            
-        elif optimization_type == "optimize":
-            # Optimize content for platform
-            if platform == "twitter":
-                optimized = content[:280]  # Twitter character limit
-            elif platform == "instagram":
-                optimized = content + "\n\n#instagram #content #creative"
-            else:
-                optimized = content
-            
-            result_data["optimized_content"] = optimized
-            
-        elif optimization_type == "schedule":
-            # Suggest optimal posting times
-            optimal_times = [
-                "2024-01-15T09:00:00Z",
-                "2024-01-15T15:00:00Z",
-                "2024-01-15T19:00:00Z"
-            ]
-            result_data["optimal_times"] = optimal_times
-        
-        # Simulate token usage
-        tokens_used = len(content.split()) + 50  # Base tokens for optimization
-        cost = tokens_used * 0.0001
+        # Route to appropriate operation
+        if optimization_type == "optimize":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.SOCIAL_MEDIA_PLANNER,
+                operation="optimize",
+                parameters={
+                    "content": content,
+                    "platform": platform,
+                    **job.parameters
+                }
+            )
+        elif optimization_type == "hashtags":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.SOCIAL_MEDIA_PLANNER,
+                operation="generate_hashtags",
+                parameters={
+                    "content": content,
+                    "platform": platform,
+                    "count": job.parameters.get("count", 5)
+                }
+            )
+        elif optimization_type == "suggest_times":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.SOCIAL_MEDIA_PLANNER,
+                operation="suggest_times",
+                parameters={
+                    "platform": platform,
+                    "target_audience": job.parameters.get("target_audience", "general"),
+                    "days_ahead": job.parameters.get("days_ahead", 7)
+                }
+            )
+        elif optimization_type == "predict_engagement":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.SOCIAL_MEDIA_PLANNER,
+                operation="predict_engagement",
+                parameters={
+                    "content": content,
+                    "platform": platform,
+                    **job.parameters
+                }
+            )
+        else:
+            raise JobProcessingError(
+                job_id=str(job.id),
+                message=f"Unknown optimization type: {optimization_type}"
+            )
         
         logger.info(f"Social media optimization job {job.id} completed successfully")
         
         return JobResult(
-            data=result_data,
-            tokens_used=tokens_used,
-            cost=cost
+            data=result,
+            tokens_used=result.get("tokens_used", 0),
+            cost=result.get("cost", 0.0)
         )
         
     except Exception as e:
@@ -282,57 +315,64 @@ async def handle_social_media_optimization(job: AsyncJob) -> JobResult:
 
 async def handle_analytics_processing(job: AsyncJob) -> JobResult:
     """
-    Handle analytics processing jobs.
+    Handle analytics processing jobs using Discovery Analytics Engine.
     """
     logger.info(f"Processing analytics job {job.id}")
     
     try:
+        orchestrator = get_orchestrator()
+        
         # Extract parameters
         content = job.parameters.get("content", "")
-        analysis_type = job.parameters.get("analysis_type", "tagging")
+        analysis_type = job.parameters.get("analysis_type", "tag")
         
-        if not content:
+        if not content and analysis_type not in ["analyze_trends"]:
             raise JobProcessingError(
                 job_id=str(job.id),
                 message="Content is required for analytics processing"
             )
         
-        # Simulate processing time
-        await asyncio.sleep(3)
-        
-        result_data = {"content": content, "analysis_type": analysis_type}
-        
-        if analysis_type == "tagging":
-            # Generate content tags
-            tags = ["technology", "innovation", "business", "digital", "content"]
-            result_data["tags"] = tags
-            
-        elif analysis_type == "sentiment":
-            # Analyze sentiment
-            result_data["sentiment"] = {
-                "score": 0.7,
-                "label": "positive",
-                "confidence": 0.85
-            }
-            
-        elif analysis_type == "trends":
-            # Identify trends
-            result_data["trends"] = [
-                {"topic": "AI", "relevance": 0.9},
-                {"topic": "automation", "relevance": 0.7},
-                {"topic": "digital transformation", "relevance": 0.6}
-            ]
-        
-        # Simulate token usage
-        tokens_used = len(content.split()) + 100  # Base tokens for analysis
-        cost = tokens_used * 0.0001
+        # Route to appropriate operation
+        if analysis_type == "tag":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.DISCOVERY_ANALYTICS,
+                operation="tag",
+                parameters={
+                    "content": content,
+                    "content_type": job.parameters.get("content_type", "text"),
+                    "max_tags": job.parameters.get("max_tags", 10)
+                }
+            )
+        elif analysis_type == "analyze_trends":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.DISCOVERY_ANALYTICS,
+                operation="analyze_trends",
+                parameters={
+                    "time_period": job.parameters.get("time_period", "7d"),
+                    "content_data": job.parameters.get("content_data", [])
+                }
+            )
+        elif analysis_type == "suggest_improvements":
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.DISCOVERY_ANALYTICS,
+                operation="suggest_improvements",
+                parameters={
+                    "content": content,
+                    **job.parameters
+                }
+            )
+        else:
+            raise JobProcessingError(
+                job_id=str(job.id),
+                message=f"Unknown analysis type: {analysis_type}"
+            )
         
         logger.info(f"Analytics processing job {job.id} completed successfully")
         
         return JobResult(
-            data=result_data,
-            tokens_used=tokens_used,
-            cost=cost
+            data=result,
+            tokens_used=result.get("tokens_used", 0),
+            cost=result.get("cost", 0.0)
         )
         
     except Exception as e:
@@ -345,68 +385,54 @@ async def handle_analytics_processing(job: AsyncJob) -> JobResult:
 
 async def handle_media_generation(job: AsyncJob) -> JobResult:
     """
-    Handle media generation jobs (images, audio, video).
+    Handle media generation jobs (images, audio, video) using appropriate engines.
     """
     logger.info(f"Processing media generation job {job.id}")
     
     try:
+        orchestrator = get_orchestrator()
+        
         # Extract parameters
         media_type = job.parameters.get("media_type", "image")
-        prompt = job.parameters.get("prompt", "")
-        specifications = job.parameters.get("specifications", {})
+        prompt = job.parameters.get("prompt") or job.parameters.get("text") or job.parameters.get("script")
         
         if not prompt:
             raise JobProcessingError(
                 job_id=str(job.id),
-                message="Prompt is required for media generation"
+                message="Prompt/text/script is required for media generation"
             )
         
-        # Simulate longer processing time for media generation
-        if media_type == "video":
-            await asyncio.sleep(10)  # Video takes longer
-        elif media_type == "audio":
-            await asyncio.sleep(5)
-        else:  # image
-            await asyncio.sleep(3)
-        
-        # Simulate media generation
-        result_data = {
-            "media_type": media_type,
-            "prompt": prompt,
-            "specifications": specifications,
-            "generated_at": datetime.utcnow().isoformat(),
-            "file_url": f"/storage/{media_type}/{job.id}.{media_type[:3]}"  # Simulated URL
-        }
-        
+        # Route to appropriate engine based on media type
         if media_type == "image":
-            result_data.update({
-                "width": specifications.get("width", 1024),
-                "height": specifications.get("height", 1024),
-                "format": "png"
-            })
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.IMAGE_GENERATION,
+                operation="generate",
+                parameters=job.parameters
+            )
         elif media_type == "audio":
-            result_data.update({
-                "duration_seconds": specifications.get("duration", 30),
-                "format": "mp3",
-                "sample_rate": 44100
-            })
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.AUDIO_GENERATION,
+                operation="generate",
+                parameters=job.parameters
+            )
         elif media_type == "video":
-            result_data.update({
-                "duration_seconds": specifications.get("duration", 60),
-                "format": "mp4",
-                "resolution": specifications.get("resolution", "1080p")
-            })
-        
-        # Simulate higher token usage and cost for media
-        tokens_used = len(prompt.split()) * 10  # Media generation uses more tokens
-        cost = tokens_used * 0.001  # Higher cost for media generation
+            result = await orchestrator.execute_engine_operation(
+                engine_type=EngineType.VIDEO_PIPELINE,
+                operation="generate",
+                parameters=job.parameters
+            )
+        else:
+            raise JobProcessingError(
+                job_id=str(job.id),
+                message=f"Unknown media type: {media_type}"
+            )
         
         logger.info(f"Media generation job {job.id} completed successfully")
         
         return JobResult(
-            data=result_data,
-            tokens_used=tokens_used,
-            cost=cost
+            data=result,
+            tokens_used=result.get("tokens_used", 0),
+            cost=result.get("cost", 0.0)
         )
         
     except Exception as e:

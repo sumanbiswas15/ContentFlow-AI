@@ -28,6 +28,15 @@ from app.core.exceptions import (
     RateLimitError, UsageLimitError
 )
 
+# Import all specialized engines
+from app.ai.text_intelligence_engine import TextIntelligenceEngine
+from app.ai.creative_assistant_engine import CreativeAssistantEngine
+from app.ai.social_media_planner import SocialMediaPlanner
+from app.ai.discovery_analytics_engine import DiscoveryAnalyticsEngine
+from app.ai.image_generation_engine import ImageGenerationEngine
+from app.ai.audio_generation_engine import AudioGenerationEngine
+from app.ai.video_pipeline_engine import VideoPipelineEngine
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,8 +96,13 @@ class AIOrchestrator:
         self.engine_capabilities: Dict[EngineType, EngineCapability] = {}
         self.active_workflows: Dict[str, WorkflowExecution] = {}
         self.system_health = SystemHealth(status="healthy")
+        
+        # Initialize engine instances
+        self.engines: Dict[EngineType, Any] = {}
+        
         self._initialize_gemini()
         self._initialize_engine_capabilities()
+        self._initialize_engines()
     
     def _initialize_gemini(self):
         """Initialize Google Gemini client."""
@@ -98,7 +112,7 @@ class AIOrchestrator:
                 return
             
             genai.configure(api_key=settings.GOOGLE_API_KEY)
-            self.gemini_client = genai.GenerativeModel('gemini-pro')
+            self.gemini_client = genai.GenerativeModel('gemini-2.5-flash')
             logger.info("Gemini client initialized successfully")
             
         except Exception as e:
@@ -167,6 +181,347 @@ class AIOrchestrator:
             )
         }
     
+    def _initialize_engines(self):
+        """Initialize all specialized engine instances."""
+        try:
+            logger.info("Initializing specialized engines...")
+            
+            # Initialize Text Intelligence Engine
+            self.engines[EngineType.TEXT_INTELLIGENCE] = TextIntelligenceEngine()
+            logger.info("Text Intelligence Engine initialized")
+            
+            # Initialize Creative Assistant Engine
+            self.engines[EngineType.CREATIVE_ASSISTANT] = CreativeAssistantEngine()
+            logger.info("Creative Assistant Engine initialized")
+            
+            # Initialize Social Media Planner
+            self.engines[EngineType.SOCIAL_MEDIA_PLANNER] = SocialMediaPlanner()
+            logger.info("Social Media Planner initialized")
+            
+            # Initialize Discovery Analytics Engine
+            self.engines[EngineType.DISCOVERY_ANALYTICS] = DiscoveryAnalyticsEngine()
+            logger.info("Discovery Analytics Engine initialized")
+            
+            # Initialize Image Generation Engine
+            self.engines[EngineType.IMAGE_GENERATION] = ImageGenerationEngine()
+            logger.info("Image Generation Engine initialized")
+            
+            # Initialize Audio Generation Engine
+            self.engines[EngineType.AUDIO_GENERATION] = AudioGenerationEngine()
+            logger.info("Audio Generation Engine initialized")
+            
+            # Initialize Video Pipeline Engine
+            self.engines[EngineType.VIDEO_PIPELINE] = VideoPipelineEngine()
+            logger.info("Video Pipeline Engine initialized")
+            
+            logger.info(f"Successfully initialized {len(self.engines)} specialized engines")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize engines: {e}")
+            # Mark engines as unavailable but don't fail orchestrator initialization
+            for engine_type in EngineType:
+                if engine_type not in self.engines:
+                    self.engine_capabilities[engine_type].availability = False
+                    self.system_health.add_service_status(engine_type.value, "unavailable")
+    
+    def get_engine(self, engine_type: EngineType) -> Optional[Any]:
+        """
+        Get a specialized engine instance by type.
+        
+        Args:
+            engine_type: Type of engine to retrieve
+            
+        Returns:
+            Engine instance or None if not available
+        """
+        return self.engines.get(engine_type)
+    
+    async def execute_engine_operation(
+        self,
+        engine_type: EngineType,
+        operation: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Execute an operation on a specialized engine.
+        
+        Args:
+            engine_type: Type of engine to use
+            operation: Operation to execute
+            parameters: Operation parameters
+            
+        Returns:
+            Operation result dictionary
+            
+        Raises:
+            EngineError: If engine is unavailable or operation fails
+        """
+        try:
+            # Get engine instance
+            engine = self.get_engine(engine_type)
+            if not engine:
+                raise EngineError(
+                    engine_type.value,
+                    f"Engine {engine_type.value} is not available"
+                )
+            
+            # Check engine capability
+            capability = self.engine_capabilities.get(engine_type)
+            if not capability or not capability.availability:
+                raise EngineError(
+                    engine_type.value,
+                    f"Engine {engine_type.value} is currently unavailable"
+                )
+            
+            # Route to appropriate engine method based on operation
+            result = await self._route_engine_operation(engine, engine_type, operation, parameters)
+            
+            # Update engine metrics
+            capability.error_rate = max(0, capability.error_rate - 0.01)  # Decrease error rate on success
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Engine operation failed: {engine_type.value}.{operation} - {e}")
+            
+            # Update engine metrics
+            if engine_type in self.engine_capabilities:
+                self.engine_capabilities[engine_type].error_rate = min(
+                    1.0,
+                    self.engine_capabilities[engine_type].error_rate + 0.05
+                )
+            
+            # Handle error with recovery strategy
+            error_response = await self.handle_engine_error(engine_type.value, e)
+            raise EngineError(engine_type.value, str(e), details=error_response)
+    
+    async def _route_engine_operation(
+        self,
+        engine: Any,
+        engine_type: EngineType,
+        operation: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Route operation to the appropriate engine method.
+        
+        Args:
+            engine: Engine instance
+            engine_type: Type of engine
+            operation: Operation name
+            parameters: Operation parameters
+            
+        Returns:
+            Operation result
+        """
+        # Text Intelligence Engine operations
+        if engine_type == EngineType.TEXT_INTELLIGENCE:
+            if operation == "generate":
+                from app.ai.text_intelligence_engine import GenerationRequest
+                request = GenerationRequest(**parameters)
+                result = await engine.generate_content(request)
+                return {"content": result.content, "metadata": result.metadata, "cost": result.cost}
+            
+            elif operation == "summarize":
+                from app.ai.text_intelligence_engine import SummarizationRequest
+                request = SummarizationRequest(**parameters)
+                result = await engine.summarize_content(request)
+                return {"content": result.content, "metadata": result.metadata, "cost": result.cost}
+            
+            elif operation == "transform_tone":
+                from app.ai.text_intelligence_engine import ToneTransformationRequest
+                request = ToneTransformationRequest(**parameters)
+                result = await engine.transform_tone(request)
+                return {"content": result.content, "metadata": result.metadata, "cost": result.cost}
+            
+            elif operation == "translate":
+                from app.ai.text_intelligence_engine import TranslationRequest
+                request = TranslationRequest(**parameters)
+                result = await engine.translate_content(request)
+                return {"content": result.content, "metadata": result.metadata, "cost": result.cost}
+            
+            elif operation == "adapt_platform":
+                from app.ai.text_intelligence_engine import PlatformAdaptationRequest
+                request = PlatformAdaptationRequest(**parameters)
+                result = await engine.adapt_for_platform(request)
+                return {"content": result.content, "metadata": result.metadata, "cost": result.cost}
+        
+        # Creative Assistant Engine operations
+        elif engine_type == EngineType.CREATIVE_ASSISTANT:
+            if operation == "start_session":
+                from app.ai.creative_assistant_engine import CreativeContext
+                context = CreativeContext(**parameters)
+                session_id = await engine.start_creative_session(context)
+                return {"session_id": session_id}
+            
+            elif operation == "suggest":
+                from app.ai.creative_assistant_engine import SuggestionRequest
+                session_id = parameters.pop("session_id")
+                request = SuggestionRequest(**parameters)
+                suggestions = await engine.provide_suggestions(session_id, request)
+                return {"suggestions": [s.dict() for s in suggestions]}
+            
+            elif operation == "refine":
+                from app.ai.creative_assistant_engine import Feedback
+                session_id = parameters.pop("session_id")
+                feedback = Feedback(**parameters)
+                suggestions = await engine.refine_suggestions(session_id, feedback)
+                return {"suggestions": [s.dict() for s in suggestions]}
+            
+            elif operation == "design_assist":
+                from app.ai.creative_assistant_engine import DesignAssistanceRequest
+                session_id = parameters.pop("session_id")
+                request = DesignAssistanceRequest(**parameters)
+                suggestions = await engine.provide_design_assistance(session_id, request)
+                return {"suggestions": [s.dict() for s in suggestions]}
+            
+            elif operation == "marketing_assist":
+                from app.ai.creative_assistant_engine import MarketingAssistanceRequest
+                session_id = parameters.pop("session_id")
+                request = MarketingAssistanceRequest(**parameters)
+                suggestions = await engine.provide_marketing_assistance(session_id, request)
+                return {"suggestions": [s.dict() for s in suggestions]}
+        
+        # Social Media Planner operations
+        elif engine_type == EngineType.SOCIAL_MEDIA_PLANNER:
+            if operation == "optimize":
+                from app.ai.social_media_planner import OptimizationRequest
+                request = OptimizationRequest(**parameters)
+                result = await engine.optimize_for_platform(request)
+                return result.dict()
+            
+            elif operation == "generate_hashtags":
+                from app.ai.social_media_planner import HashtagRequest
+                request = HashtagRequest(**parameters)
+                hashtags = await engine.generate_hashtags(request)
+                return {"hashtags": hashtags}
+            
+            elif operation == "suggest_times":
+                from app.ai.social_media_planner import PostingTimeRequest
+                request = PostingTimeRequest(**parameters)
+                suggestions = await engine.suggest_posting_times(request)
+                return {"suggestions": [s.dict() for s in suggestions]}
+            
+            elif operation == "predict_engagement":
+                from app.ai.social_media_planner import EngagementPredictionRequest
+                request = EngagementPredictionRequest(**parameters)
+                score = await engine.predict_engagement(request)
+                return score.dict()
+        
+        # Discovery Analytics Engine operations
+        elif engine_type == EngineType.DISCOVERY_ANALYTICS:
+            if operation == "tag":
+                from app.ai.discovery_analytics_engine import ContentTaggingRequest
+                request = ContentTaggingRequest(**parameters)
+                result = await engine.auto_tag_content(request)
+                return result.dict()
+            
+            elif operation == "analyze_trends":
+                from app.ai.discovery_analytics_engine import TrendAnalysisRequest
+                request = TrendAnalysisRequest(**parameters)
+                content_data = parameters.get("content_data", [])
+                result = await engine.analyze_trends(request, content_data)
+                return result.dict()
+            
+            elif operation == "calculate_metrics":
+                from app.ai.discovery_analytics_engine import EngagementAnalysisRequest
+                from app.models.content import EngagementMetrics
+                request = EngagementAnalysisRequest(**parameters)
+                raw_metrics = EngagementMetrics(**parameters.get("raw_metrics", {}))
+                result = await engine.calculate_engagement_metrics(request, raw_metrics)
+                return result.dict()
+            
+            elif operation == "suggest_improvements":
+                from app.ai.discovery_analytics_engine import ImprovementSuggestionsRequest
+                request = ImprovementSuggestionsRequest(**parameters)
+                result = await engine.generate_improvement_suggestions(request)
+                return result.dict()
+        
+        # Image Generation Engine operations
+        elif engine_type == EngineType.IMAGE_GENERATION:
+            if operation == "generate":
+                from app.ai.image_generation_engine import ImageGenerationRequest
+                request = ImageGenerationRequest(**parameters)
+                result = await engine.generate_image(request)
+                return result.dict()
+            
+            elif operation == "generate_thumbnail":
+                result = await engine.generate_thumbnail(
+                    prompt=parameters.get("prompt"),
+                    width=parameters.get("width", 320),
+                    height=parameters.get("height", 180),
+                    style=parameters.get("style")
+                )
+                return result.dict()
+            
+            elif operation == "generate_poster":
+                result = await engine.generate_poster(
+                    prompt=parameters.get("prompt"),
+                    width=parameters.get("width", 1920),
+                    height=parameters.get("height", 1080),
+                    style=parameters.get("style")
+                )
+                return result.dict()
+        
+        # Audio Generation Engine operations
+        elif engine_type == EngineType.AUDIO_GENERATION:
+            if operation == "generate":
+                from app.ai.audio_generation_engine import AudioGenerationRequest
+                request = AudioGenerationRequest(**parameters)
+                result = await engine.generate_audio(request)
+                return result.dict()
+            
+            elif operation == "generate_voiceover":
+                result = await engine.generate_voiceover(
+                    text=parameters.get("text"),
+                    voice_style=parameters.get("voice_style"),
+                    format=parameters.get("format")
+                )
+                return result.dict()
+            
+            elif operation == "generate_music":
+                result = await engine.generate_background_music(
+                    genre=parameters.get("genre"),
+                    duration_seconds=parameters.get("duration_seconds", 60),
+                    mood=parameters.get("mood", "uplifting"),
+                    tempo=parameters.get("tempo", "medium"),
+                    format=parameters.get("format")
+                )
+                return result.dict()
+        
+        # Video Pipeline Engine operations
+        elif engine_type == EngineType.VIDEO_PIPELINE:
+            if operation == "generate":
+                from app.ai.video_pipeline_engine import VideoGenerationRequest
+                request = VideoGenerationRequest(**parameters)
+                result = await engine.generate_video(request)
+                return result.dict()
+            
+            elif operation == "generate_short_form":
+                result = await engine.generate_short_form_video(
+                    script=parameters.get("script"),
+                    duration_seconds=parameters.get("duration_seconds", 60),
+                    style=parameters.get("style"),
+                    quality=parameters.get("quality")
+                )
+                return result.dict()
+            
+            elif operation == "generate_explainer":
+                result = await engine.generate_explainer_video(
+                    script=parameters.get("script"),
+                    duration_seconds=parameters.get("duration_seconds", 120),
+                    style=parameters.get("style"),
+                    include_subtitles=parameters.get("include_subtitles", True)
+                )
+                return result.dict()
+        
+        # Default: operation not supported
+        raise EngineError(
+            engine_type.value,
+            f"Operation '{operation}' not supported for engine {engine_type.value}"
+        )
+
+    
     async def orchestrate_workflow(self, request: WorkflowRequest) -> WorkflowResponse:
         """
         Main orchestration method that coordinates complex workflows using LLM reasoning.
@@ -196,7 +551,7 @@ class AIOrchestrator:
             )
             
             # Create and queue jobs based on the plan
-            job_ids = await self._create_workflow_jobs(workflow_plan, request, workflow_execution.id)
+            job_ids = await self._create_workflow_jobs(workflow_plan, request, str(workflow_execution.id))
             workflow_execution.job_ids = job_ids
             
             # Store workflow execution
@@ -778,3 +1133,379 @@ class AIOrchestrator:
         
         # Could add more error handling logic here
         # such as notifying administrators, cleaning up resources, etc.
+    
+    async def complete_workflow(
+        self,
+        workflow_id: str,
+        final_status: str = "completed",
+        results: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Complete a workflow and perform cleanup.
+        
+        Args:
+            workflow_id: ID of the workflow to complete
+            final_status: Final status (completed, failed, cancelled)
+            results: Optional workflow results
+            
+        Returns:
+            Workflow completion summary
+        """
+        try:
+            logger.info(f"Completing workflow {workflow_id} with status: {final_status}")
+            
+            # Get workflow execution
+            database = get_database()
+            workflow_doc = await database.workflow_executions.find_one({"_id": workflow_id})
+            
+            if not workflow_doc:
+                raise ValidationError(f"Workflow {workflow_id} not found")
+            
+            workflow = WorkflowExecution(**workflow_doc)
+            
+            # Update workflow status
+            workflow.status = final_status
+            workflow.completed_at = datetime.utcnow()
+            
+            # Calculate total cost and tokens
+            total_cost = 0.0
+            total_tokens = 0
+            
+            # Aggregate results from all jobs
+            job_results = []
+            for job_id in workflow.job_ids:
+                job_doc = await database.async_jobs.find_one({"_id": job_id})
+                if job_doc:
+                    job = AsyncJob(**job_doc)
+                    if job.result:
+                        job_results.append(job.result)
+                        if isinstance(job.result, dict):
+                            total_cost += job.result.get("cost", 0.0)
+                            total_tokens += job.result.get("tokens_used", 0)
+            
+            # Store aggregated results
+            workflow.final_result = {
+                "status": final_status,
+                "job_results": job_results,
+                "total_cost": total_cost,
+                "total_tokens": total_tokens,
+                "results": results or {}
+            }
+            
+            # Update workflow in database
+            await database.workflow_executions.update_one(
+                {"_id": workflow_id},
+                {"$set": workflow.dict()}
+            )
+            
+            # Remove from active workflows
+            if workflow_id in self.active_workflows:
+                del self.active_workflows[workflow_id]
+            
+            # Send completion notification
+            await self._send_workflow_notification(workflow, final_status)
+            
+            # Create completion summary
+            summary = {
+                "workflow_id": workflow_id,
+                "status": final_status,
+                "duration_seconds": (
+                    workflow.completed_at - workflow.created_at
+                ).total_seconds() if workflow.completed_at else 0,
+                "jobs_completed": len([j for j in job_results if j]),
+                "total_jobs": len(workflow.job_ids),
+                "total_cost": total_cost,
+                "total_tokens": total_tokens,
+                "results": results
+            }
+            
+            logger.info(f"Workflow {workflow_id} completed: {summary}")
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Failed to complete workflow {workflow_id}: {e}")
+            raise OrchestrationError(f"Workflow completion failed: {e}")
+    
+    async def transition_workflow_state(
+        self,
+        workflow_id: str,
+        content_id: str,
+        new_state: WorkflowState,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Transition workflow state with validation and tracking.
+        
+        Args:
+            workflow_id: ID of the workflow
+            content_id: ID of the content item
+            new_state: New workflow state to transition to
+            metadata: Optional metadata about the transition
+        """
+        try:
+            logger.info(f"Transitioning workflow {workflow_id} to state: {new_state}")
+            
+            # Validate and update content item state
+            await self.manage_workflow_state(content_id, new_state)
+            
+            # Update workflow execution record
+            database = get_database()
+            await database.workflow_executions.update_one(
+                {"_id": workflow_id},
+                {
+                    "$set": {
+                        "current_state": new_state,
+                        "updated_at": datetime.utcnow()
+                    },
+                    "$push": {
+                        "state_history": {
+                            "state": new_state,
+                            "timestamp": datetime.utcnow(),
+                            "metadata": metadata or {}
+                        }
+                    }
+                }
+            )
+            
+            # Update active workflow tracking
+            if workflow_id in self.active_workflows:
+                self.active_workflows[workflow_id].current_state = new_state
+            
+            logger.info(f"Workflow state transition completed: {workflow_id} -> {new_state}")
+            
+        except Exception as e:
+            logger.error(f"Workflow state transition failed: {e}")
+            raise OrchestrationError(f"State transition failed: {e}")
+    
+    async def monitor_workflow_progress(
+        self,
+        workflow_id: str
+    ) -> Dict[str, Any]:
+        """
+        Monitor workflow progress and return current status.
+        
+        Args:
+            workflow_id: ID of the workflow to monitor
+            
+        Returns:
+            Dictionary with workflow progress information
+        """
+        try:
+            database = get_database()
+            
+            # Get workflow execution
+            workflow_doc = await database.workflow_executions.find_one({"_id": workflow_id})
+            if not workflow_doc:
+                raise ValidationError(f"Workflow {workflow_id} not found")
+            
+            workflow = WorkflowExecution(**workflow_doc)
+            
+            # Get job statuses
+            job_statuses = {}
+            completed_jobs = 0
+            failed_jobs = 0
+            running_jobs = 0
+            
+            for job_id in workflow.job_ids:
+                job_doc = await database.async_jobs.find_one({"_id": job_id})
+                if job_doc:
+                    job = AsyncJob(**job_doc)
+                    job_statuses[job_id] = job.status
+                    
+                    if job.status == JobStatus.COMPLETED:
+                        completed_jobs += 1
+                    elif job.status == JobStatus.FAILED:
+                        failed_jobs += 1
+                    elif job.status == JobStatus.RUNNING:
+                        running_jobs += 1
+            
+            # Calculate progress percentage
+            total_jobs = len(workflow.job_ids)
+            progress_percentage = (completed_jobs / total_jobs * 100) if total_jobs > 0 else 0
+            
+            # Determine overall status
+            if failed_jobs > 0 and completed_jobs + failed_jobs == total_jobs:
+                overall_status = "failed"
+            elif completed_jobs == total_jobs:
+                overall_status = "completed"
+            elif running_jobs > 0:
+                overall_status = "running"
+            else:
+                overall_status = "queued"
+            
+            # Calculate estimated time remaining
+            if workflow.created_at and completed_jobs > 0:
+                elapsed_time = (datetime.utcnow() - workflow.created_at).total_seconds()
+                avg_time_per_job = elapsed_time / completed_jobs
+                remaining_jobs = total_jobs - completed_jobs
+                estimated_remaining = avg_time_per_job * remaining_jobs
+            else:
+                estimated_remaining = None
+            
+            progress_info = {
+                "workflow_id": workflow_id,
+                "status": overall_status,
+                "progress_percentage": round(progress_percentage, 2),
+                "jobs": {
+                    "total": total_jobs,
+                    "completed": completed_jobs,
+                    "failed": failed_jobs,
+                    "running": running_jobs,
+                    "queued": total_jobs - completed_jobs - failed_jobs - running_jobs
+                },
+                "job_statuses": job_statuses,
+                "estimated_remaining_seconds": estimated_remaining,
+                "created_at": workflow.created_at,
+                "updated_at": workflow.updated_at
+            }
+            
+            return progress_info
+            
+        except Exception as e:
+            logger.error(f"Failed to monitor workflow progress: {e}")
+            raise OrchestrationError(f"Progress monitoring failed: {e}")
+    
+    async def get_workflow_analytics(
+        self,
+        workflow_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get analytics and metrics for a workflow.
+        
+        Args:
+            workflow_id: ID of the workflow
+            
+        Returns:
+            Dictionary with workflow analytics
+        """
+        try:
+            database = get_database()
+            
+            # Get workflow execution
+            workflow_doc = await database.workflow_executions.find_one({"_id": workflow_id})
+            if not workflow_doc:
+                raise ValidationError(f"Workflow {workflow_id} not found")
+            
+            workflow = WorkflowExecution(**workflow_doc)
+            
+            # Collect job analytics
+            job_analytics = []
+            total_cost = 0.0
+            total_tokens = 0
+            engine_usage = {}
+            
+            for job_id in workflow.job_ids:
+                job_doc = await database.async_jobs.find_one({"_id": job_id})
+                if job_doc:
+                    job = AsyncJob(**job_doc)
+                    
+                    # Calculate job duration
+                    if job.started_at and job.completed_at:
+                        duration = (job.completed_at - job.started_at).total_seconds()
+                    else:
+                        duration = None
+                    
+                    # Extract cost and tokens from result
+                    cost = 0.0
+                    tokens = 0
+                    if job.result and isinstance(job.result, dict):
+                        cost = job.result.get("cost", 0.0)
+                        tokens = job.result.get("tokens_used", 0)
+                    
+                    total_cost += cost
+                    total_tokens += tokens
+                    
+                    # Track engine usage
+                    engine = job.engine
+                    if engine not in engine_usage:
+                        engine_usage[engine] = {"count": 0, "cost": 0.0, "tokens": 0}
+                    engine_usage[engine]["count"] += 1
+                    engine_usage[engine]["cost"] += cost
+                    engine_usage[engine]["tokens"] += tokens
+                    
+                    job_analytics.append({
+                        "job_id": job_id,
+                        "engine": engine,
+                        "operation": job.operation,
+                        "status": job.status,
+                        "duration_seconds": duration,
+                        "cost": cost,
+                        "tokens_used": tokens,
+                        "retry_count": job.retry_count
+                    })
+            
+            # Calculate workflow duration
+            if workflow.completed_at:
+                workflow_duration = (workflow.completed_at - workflow.created_at).total_seconds()
+            else:
+                workflow_duration = (datetime.utcnow() - workflow.created_at).total_seconds()
+            
+            analytics = {
+                "workflow_id": workflow_id,
+                "workflow_name": workflow.workflow_name,
+                "status": workflow.status,
+                "duration_seconds": workflow_duration,
+                "total_jobs": len(workflow.job_ids),
+                "total_cost": total_cost,
+                "total_tokens": total_tokens,
+                "engine_usage": engine_usage,
+                "job_analytics": job_analytics,
+                "created_at": workflow.created_at,
+                "completed_at": workflow.completed_at,
+                "user_id": workflow.user_id
+            }
+            
+            return analytics
+            
+        except Exception as e:
+            logger.error(f"Failed to get workflow analytics: {e}")
+            raise OrchestrationError(f"Analytics retrieval failed: {e}")
+    
+    async def _send_workflow_notification(
+        self,
+        workflow: WorkflowExecution,
+        status: str
+    ) -> None:
+        """
+        Send notification about workflow completion.
+        
+        Args:
+            workflow: Workflow execution object
+            status: Final workflow status
+        """
+        try:
+            # Import notification service
+            from app.services.notifications import NotificationService
+            
+            notification_service = NotificationService()
+            
+            # Create notification message
+            if status == "completed":
+                message = f"Workflow '{workflow.workflow_name}' completed successfully"
+                notification_type = "success"
+            elif status == "failed":
+                message = f"Workflow '{workflow.workflow_name}' failed"
+                notification_type = "error"
+            else:
+                message = f"Workflow '{workflow.workflow_name}' status: {status}"
+                notification_type = "info"
+            
+            # Send notification
+            await notification_service.send_notification(
+                user_id=workflow.user_id,
+                notification_type=notification_type,
+                title="Workflow Update",
+                message=message,
+                data={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.workflow_name,
+                    "status": status,
+                    "job_count": len(workflow.job_ids)
+                }
+            )
+            
+            logger.info(f"Notification sent for workflow {workflow.id}")
+            
+        except Exception as e:
+            # Don't fail workflow completion if notification fails
+            logger.warning(f"Failed to send workflow notification: {e}")

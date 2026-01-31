@@ -68,8 +68,20 @@ def notification_service(mock_database):
 @pytest.fixture
 def job_service(mock_database):
     """Create job service for testing."""
-    service = JobService(mock_database)
-    return service
+    with patch('app.services.job_service.get_queue_manager') as mock_qm, \
+         patch('app.services.job_service.get_job_processor') as mock_jp, \
+         patch('app.services.job_service.get_notification_service') as mock_ns, \
+         patch('app.services.job_service.get_workflow_manager') as mock_wm:
+        
+        # Create mock instances
+        job_proc = JobProcessor(mock_database)
+        mock_qm.return_value = QueueManager(mock_database)
+        mock_jp.return_value = job_proc
+        mock_ns.return_value = NotificationService(mock_database)
+        mock_wm.return_value = WorkflowManager(job_proc, mock_database)
+        
+        service = JobService(mock_database)
+        yield service
 
 
 @pytest.fixture
@@ -389,11 +401,14 @@ class TestJobProcessingIntegration:
     async def test_end_to_end_job_processing(self, mock_workflow_manager, mock_notification_service, 
                                            mock_job_processor, mock_queue_manager, mock_database):
         """Test end-to-end job processing flow."""
+        # Create mock instances
+        job_proc = JobProcessor(mock_database)
+        
         # Mock the service dependencies
         mock_queue_manager.return_value = QueueManager(mock_database)
-        mock_job_processor.return_value = JobProcessor(mock_database)
+        mock_job_processor.return_value = job_proc
         mock_notification_service.return_value = NotificationService(mock_database)
-        mock_workflow_manager.return_value = WorkflowManager(mock_database)
+        mock_workflow_manager.return_value = WorkflowManager(job_proc, mock_database)
         
         # Create job service
         job_service = JobService(mock_database)
@@ -422,6 +437,15 @@ class TestJobProcessingIntegration:
     @pytest.mark.asyncio
     async def test_job_retry_flow(self, mock_database, sample_job):
         """Test job retry flow."""
+        # Configure job to retry on JOB_PROCESSING_ERROR
+        from app.models.jobs import RetryConfig
+        sample_job.retry_config = RetryConfig(
+            max_retries=3,
+            retry_delay_seconds=1,
+            exponential_backoff=False,
+            retry_on_errors=["JOB_PROCESSING_ERROR", "TIMEOUT", "SERVICE_UNAVAILABLE"]
+        )
+        
         job_processor = JobProcessor(mock_database)
         
         # Mock failing then succeeding handler
@@ -442,7 +466,7 @@ class TestJobProcessingIntegration:
         # Process job (would normally be done by worker)
         await job_processor._process_job(sample_job)
         
-        # Verify retry was scheduled
+        # Verify retry was scheduled (retry_count should be incremented)
         assert sample_job.retry_count > 0 or sample_job.status == JobStatus.COMPLETED
 
 
