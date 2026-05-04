@@ -13,6 +13,7 @@
 
 - [Overview](#overview)
 - [Features](#features)
+- [Interface Screenshots](#interface-screenshots)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Getting Started](#getting-started)
@@ -115,6 +116,47 @@ ContentFlow AI is a comprehensive content management platform that leverages art
 - Cost analysis
 - Usage statistics
 - Custom dashboards
+
+## 🖥️ Interface Screenshots
+
+A visual tour of the ContentFlow AI platform:
+
+### Landing Page
+![Landing Page](docs/screenshots/Cr1.png)
+
+### Login & Register
+<p align="center">
+  <img src="docs/screenshots/Cr2.png" alt="Login Page" width="48%"/>
+  &nbsp;
+  <img src="docs/screenshots/Cr3.png" alt="Register Page" width="48%"/>
+</p>
+
+### Dashboard
+![Dashboard](docs/screenshots/Cr4.png)
+
+### Content Management
+<p align="center">
+  <img src="docs/screenshots/Cr5.png" alt="Content List" width="48%"/>
+  &nbsp;
+  <img src="docs/screenshots/Cr5.5.png" alt="Content Create" width="48%"/>
+</p>
+
+### AI Engines
+![AI Engines](docs/screenshots/Cr6.png)
+
+### Analytics
+![Analytics](docs/screenshots/Cr7.png)
+
+### Job Processing
+![Jobs](docs/screenshots/Cr8.png)
+
+### Content Scheduler
+![Content Scheduler](docs/screenshots/Cr9.png)
+
+### Settings
+![Settings](docs/screenshots/Cr10.png)
+
+---
 
 ## 🏗️ Architecture
 
@@ -595,8 +637,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - **Documentation**: [Full Documentation](https://docs.contentflow-ai.com)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/contentflow-ai/issues)
-- **Email**: support@contentflow-ai.com
+- **Issues**: [GitHub Issues](https://github.com/sumanbiswas15/contentflow-ai/issues)
+- **Email**: rksb1507@gmail.com
 - **Discord**: [Join our community](https://discord.gg/contentflow-ai)
 
 ## 🗺️ Roadmap
