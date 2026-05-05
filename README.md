@@ -130,6 +130,11 @@ A visual tour of the ContentFlow AI platform:
   &nbsp;
   <img src="docs/screenshots/Cr3.png" alt="Register Page" width="48%"/>
 </p>
+<p align="center">
+  <img src="docs/screenshots/Cr2.5.png" alt="Login Page 2" width="48%"/>
+  &nbsp;
+  <img src="docs/screenshots/Cr2.6.png" alt="Register Page 2" width="48%"/>
+</p>
 
 ### Dashboard
 ![Dashboard](docs/screenshots/Cr4.png)
